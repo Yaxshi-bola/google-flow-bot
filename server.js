@@ -866,11 +866,31 @@ app.get('/inspect', async (req, res) => {
       return { inputs, buttons: buttons.filter(b => b.text || b.ariaLabel) };
     });
 
+    // Click Settings button to inspect generation mode options
+    const settingsBtn = page.locator('button[aria-label="Settings"]').first();
+    let settingsOpen = false;
+    let menuItems = [];
+    if (await settingsBtn.isVisible().catch(() => false)) {
+      await settingsBtn.click();
+      await page.waitForTimeout(1500);
+      settingsOpen = true;
+      menuItems = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], [role="radio"], [role="dialog"], button, [role="tab"]'))
+          .map(el => ({
+            tag: el.tagName.toLowerCase(),
+            role: el.getAttribute('role'),
+            text: (el.innerText || '').trim().replace(/\n+/g, ' ').slice(0, 50),
+            ariaLabel: el.getAttribute('aria-label')
+          }))
+          .filter(el => el.text || el.ariaLabel);
+      });
+    }
+
     const screenPath = path.join(DOWNLOADS_DIR, 'latest_page.png');
     await page.screenshot({ path: screenPath });
     await browser.close();
 
-    res.json({ success: true, url: page.url(), ...info });
+    res.json({ success: true, url: page.url(), settingsOpen, menuItems, ...info });
   } catch (err) {
     if (browser) await browser.close().catch(() => {});
     res.status(500).json({ success: false, error: err.message, stack: err.stack });
