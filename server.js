@@ -13,7 +13,7 @@ const path = require('path');
 // Global in-memory logs
 const LOGS = [];
 function addLog(type, ...args) {
-  const line = `[${new Date().toISOString()}] [${type}] ` + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  const line = `[${new Date().toISOString()}] [${type}] ` + args.map(a => (a instanceof Error ? (a.stack || a.message) : (typeof a === 'object' ? JSON.stringify(a) : String(a)))).join(' ');
   if (type === 'ERROR') {
     process.stderr.write(line + '\n');
   } else {
@@ -503,15 +503,24 @@ async function processPrompt(item) {
     // Save screenshot with typed prompt
     await page.screenshot({ path: screenPath }).catch(() => {});
 
-    // Submit prompt using "Start generation" button (aria-label or arrow_forward text)
+    // Submit prompt: Focus input, press Enter, and click arrow button
     console.log('[FlowBot] Submitting prompt...');
+    await input.focus();
+    await page.waitForTimeout(300);
+
+    console.log('[FlowBot] Pressing Enter key in prompt box...');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(1000);
+
     const submitBtn = page.locator('button[aria-label*="Start generation" i], button[aria-label*="generation" i], button:has-text("arrow_forward")').first();
     if (await submitBtn.isVisible().catch(() => false)) {
       console.log('[FlowBot] Clicking "Start generation" button...');
-      await submitBtn.click({ force: true });
-    } else {
-      console.log('[FlowBot] Pressing Enter on input...');
-      await page.keyboard.press('Enter');
+      const box = await submitBtn.boundingBox().catch(() => null);
+      if (box) {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      } else {
+        await submitBtn.click({ force: true }).catch(() => {});
+      }
     }
     await page.waitForTimeout(2500);
 
@@ -538,11 +547,14 @@ async function processPrompt(item) {
       await page.waitForTimeout(2500);
       elapsed += 2.5;
 
-      // Check for error on page
-      const errorEl = page.locator('text=/xatolik|failed|kredit yetarli emas|error/i').first();
+      // Check for error on page (specific alerts only)
+      const errorEl = page.locator('[role="alert"], [role="alertdialog"], text=/generation failed|kredit yetarli emas|something went wrong/i').first();
       if (await errorEl.isVisible().catch(() => false)) {
-        const errText = await errorEl.innerText().catch(() => 'Noma\'lum xatolik');
-        throw new Error(`Google Flow xatolik berdi: ${errText}`);
+        const errText = await errorEl.innerText().catch(() => '');
+        if (errText && !errText.toLowerCase().includes('double check')) {
+          console.warn(`[FlowBot] Flow warning/error: ${errText}`);
+          throw new Error(`Google Flow xatolik: ${errText}`);
+        }
       }
 
       // Check percentage on cards
@@ -560,6 +572,7 @@ async function processPrompt(item) {
       if (pctMatch) {
         sawProgress = true;
         currentProgress = `${pctMatch}% yaratilmoqda`;
+        console.log(`[FlowBot] Progress update: ${pctMatch}%`);
         try {
           await bot.editMessageText(`🔄 <b>${typeLabel} yaratilmoqda:</b>\n"<i>${escapeHtml(prompt)}</i>"\n\n📊 Progress: <b>${pctMatch}%</b>`, {
             chat_id: chatId,
