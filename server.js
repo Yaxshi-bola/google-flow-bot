@@ -397,31 +397,29 @@ async function processPrompt(item) {
       throw new Error('Google hisobiga kirilmadi. Iltimos botga /cookie orqali yangi cookie yuboring!');
     }
 
-    // If 404 project not found, click "Back to projects" and select latest project
-    if (page.url().includes('404') || (await page.locator('text=/Project not found/i').isVisible().catch(() => false))) {
-      console.log('[FlowBot] 404 Project not found. Clicking "Back to projects"...');
+    // If on home page or 404 project not found, open latest project or create one
+    if (page.url().includes('404') || page.url().endsWith('flow.google.com/') || page.url().endsWith('flow.google.com') || (await page.locator('text=/Project not found/i').isVisible().catch(() => false))) {
+      console.log('[FlowBot] Home or 404 page detected. Finding active project...');
       const backBtn = page.locator('button:has-text("Back to projects"), a:has-text("Back to projects"), [role="button"]:has-text("Back to projects")').first();
       if (await backBtn.isVisible().catch(() => false)) {
-        await backBtn.click();
-        await page.waitForTimeout(5000);
-        console.log('[FlowBot] Now at projects page:', page.url());
+        await backBtn.click().catch(() => {});
+        await page.waitForTimeout(4000);
       }
       
-      const firstProj = page.locator('a[href*="/project/"]').first();
-      if (await firstProj.isVisible().catch(() => false)) {
-        console.log('[FlowBot] Clicking first existing project...');
-        await firstProj.click();
+      const card = page.locator('text=/сент|project|loyiha/i').first();
+      if (await card.isVisible().catch(() => false)) {
+        console.log('[FlowBot] Clicking latest project card...');
+        await card.click({ force: true }).catch(() => {});
         await page.waitForTimeout(5000);
-        console.log('[FlowBot] Opened project:', page.url());
       } else {
-        const newProjBtn = page.locator('button:has-text("New"), [role="button"]:has-text("New"), button:has-text("Loyiha"), [role="button"]:has-text("Loyiha")').first();
-        if (await newProjBtn.isVisible().catch(() => false)) {
-          console.log('[FlowBot] Clicking create new project button...');
-          await newProjBtn.click();
+        const newProj = page.locator('text=/new project/i').first();
+        if (await newProj.isVisible().catch(() => false)) {
+          console.log('[FlowBot] Clicking New Project...');
+          await newProj.click({ force: true }).catch(() => {});
           await page.waitForTimeout(5000);
-          console.log('[FlowBot] Opened new project:', page.url());
         }
       }
+      console.log('[FlowBot] Current URL after entering project:', page.url());
     }
 
     // Switch to "Rasmlar" if image mode requested
@@ -703,7 +701,7 @@ app.get('/screenshot', (req, res) => {
 });
 
 app.get('/test-flow', async (req, res) => {
-  console.log('[TestFlow] Running Google Flow direct home test...');
+  console.log('[TestFlow] Opening Google Flow and entering project...');
   let testBrowser = null;
   try {
     const cookies = getStoredCookies();
@@ -734,34 +732,43 @@ app.get('/test-flow', async (req, res) => {
     const testPage = await ctx.newPage();
     console.log('[TestFlow] Navigating to https://flow.google.com/');
     await testPage.goto('https://flow.google.com/', { waitUntil: 'domcontentloaded', timeout: 50000 });
-    await testPage.waitForTimeout(6000);
+    await testPage.waitForTimeout(5000);
 
-    const title = await testPage.title();
-    const url = testPage.url();
-    console.log('[TestFlow] URL:', url, 'Title:', title);
+    // Click on the latest project card (e.g. сент. 13 or first card)
+    console.log('[TestFlow] Looking for project card...');
+    const card = testPage.locator('text=/сент\. 13/i').first();
+    if (await card.isVisible().catch(() => false)) {
+      console.log('[TestFlow] Found project card, clicking it...');
+      await card.click();
+      await testPage.waitForTimeout(6000);
+    } else {
+      // Fallback: click New project
+      const newProj = testPage.locator('text=/new project/i').first();
+      if (await newProj.isVisible().catch(() => false)) {
+        console.log('[TestFlow] Clicking New Project...');
+        await newProj.click();
+        await testPage.waitForTimeout(6000);
+      }
+    }
+
+    const currentUrl = testPage.url();
+    const currentTitle = await testPage.title();
+    console.log('[TestFlow] In Project! URL:', currentUrl, 'Title:', currentTitle);
 
     const screenPath = path.join(DOWNLOADS_DIR, 'latest_page.png');
     await testPage.screenshot({ path: screenPath });
 
-    const pageText = await testPage.evaluate(() => document.body.innerText.slice(0, 500)).catch(() => '');
-
-    const links = await testPage.evaluate(() => {
-      return Array.from(document.querySelectorAll('a, button, [role="button"]')).map(el => ({
-        tag: el.tagName,
-        text: (el.innerText || el.textContent || '').trim().slice(0, 50),
-        href: el.href || el.getAttribute('href') || null
-      })).filter(x => x.text.length > 0).slice(0, 30);
-    }).catch(() => []);
+    // Check if input exists
+    const inputSelector = 'textarea, [contenteditable="true"], [role="textbox"], input[placeholder*="yaratilishi" i], input[type="text"]';
+    const hasInput = await testPage.locator(inputSelector).first().isVisible().catch(() => false);
 
     await testBrowser.close();
 
     res.json({
       success: true,
-      url,
-      title,
-      cookiesLoaded: cookies.length,
-      pageTextPreview: pageText,
-      elements: links,
+      url: currentUrl,
+      title: currentTitle,
+      hasPromptInput: hasInput,
       screenshotUrl: '/screenshot'
     });
   } catch (err) {
