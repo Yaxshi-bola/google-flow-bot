@@ -480,36 +480,61 @@ async function processPrompt(item) {
     await input.click();
     await page.waitForTimeout(400);
 
-    // Clear any previous text
-    await page.keyboard.press('Control+A').catch(() => {});
-    await page.keyboard.press('Backspace').catch(() => {});
+    // Type prompt using execCommand for native contenteditable data binding
+    console.log(`[FlowBot] Inserting prompt: "${flowPrompt}"`);
+    await page.evaluate((text) => {
+      const el = document.querySelector('[contenteditable="true"]');
+      if (el) {
+        el.focus();
+        document.execCommand('selectAll', false, null);
+        document.execCommand('delete', false, null);
+        document.execCommand('insertText', false, text);
+        el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      }
+    }, flowPrompt);
 
-    // Type prompt
-    await page.keyboard.type(flowPrompt, { delay: 15 });
-    console.log(`[FlowBot] Prompt typed successfully: "${flowPrompt}"`);
+    // Also type a space and backspace via keyboard to ensure any framework listener fires
+    await page.keyboard.type(' ');
+    await page.keyboard.press('Backspace');
     await page.waitForTimeout(1000);
 
     // Save screenshot with typed prompt
     await page.screenshot({ path: screenPath }).catch(() => {});
 
-    // Submit prompt: Click "Start generation" arrow button first, fallback to Enter
+    // Submit prompt: Dispatch mouse & pointer events on Start generation button
     console.log('[FlowBot] Submitting prompt...');
-    const submitBtn = page.locator('button[aria-label*="Start generation" i], button[aria-label*="generation" i], button:has-text("arrow_forward")').first();
-    await submitBtn.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-
-    if (await submitBtn.isVisible().catch(() => false)) {
-      console.log('[FlowBot] Clicking "Start generation" button...');
-      await submitBtn.click({ force: true }).catch(() => {});
-      const box = await submitBtn.boundingBox().catch(() => null);
-      if (box) {
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
+    const clicked = await page.evaluate(() => {
+      const btn = document.querySelector('button[aria-label*="Start generation" i]') ||
+                  Array.from(document.querySelectorAll('button')).find(b => (b.innerText || '').includes('arrow_forward') || b.getAttribute('aria-label') === 'Start generation');
+      if (btn) {
+        btn.focus();
+        btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+        btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        btn.click();
+        return true;
       }
-      await page.waitForTimeout(2000);
-    }
+      return false;
+    });
 
-    // Check if still unsubmitted, retry with Enter
-    if (await submitBtn.isVisible().catch(() => false)) {
-      console.log('[FlowBot] Arrow button still visible, trying Enter key...');
+    if (clicked) {
+      console.log('[FlowBot] Successfully dispatched click on Start generation button!');
+    } else {
+      console.log('[FlowBot] Submit button not found in evaluate, pressing Enter...');
+      await page.keyboard.press('Enter');
+    }
+    await page.waitForTimeout(2500);
+
+    // Check if input still has text (unsubmitted fallback)
+    const hasResidualText = await page.evaluate(() => {
+      const el = document.querySelector('[contenteditable="true"]');
+      return el && el.innerText.trim().length > 0;
+    });
+
+    if (hasResidualText) {
+      console.log('[FlowBot] Input still has text, pressing Enter key as fallback...');
       await input.focus();
       await page.keyboard.press('Enter').catch(() => {});
       await page.waitForTimeout(2000);
