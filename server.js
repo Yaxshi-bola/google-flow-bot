@@ -702,7 +702,7 @@ app.get('/screenshot', (req, res) => {
 });
 
 app.get('/test-flow', async (req, res) => {
-  console.log('[TestFlow] Opening Google Flow and entering project via card click...');
+  console.log('[TestFlow] Opening Google Flow and inspecting project cards...');
   let testBrowser = null;
   try {
     const cookies = getStoredCookies();
@@ -735,21 +735,17 @@ app.get('/test-flow', async (req, res) => {
     await testPage.goto('https://flow.google.com/', { waitUntil: 'domcontentloaded', timeout: 50000 });
     await testPage.waitForTimeout(6000);
 
-    // Find the label 'сент. 13' and click above it (in the card body)
-    console.log('[TestFlow] Locating project card...');
-    const label = testPage.locator('text=/сент|project|loyiha/i').first();
-    const box = await label.boundingBox().catch(() => null);
-    
-    if (box && box.y > 150) {
-      const clickX = box.x + box.width / 2;
-      const clickY = box.y - 100;
-      console.log(`[TestFlow] Clicking card body at (${clickX}, ${clickY})...`);
-      await testPage.mouse.click(clickX, clickY);
-      await testPage.waitForTimeout(7000);
+    // Click "New project" button or card at (175, 750)
+    console.log('[TestFlow] Trying to click "+ New project" button...');
+    const newProjBtn = testPage.locator('text="New project"').first();
+    if (await newProjBtn.isVisible().catch(() => false)) {
+      console.log('[TestFlow] Found "New project" text, clicking it...');
+      await newProjBtn.click({ force: true });
+      await testPage.waitForTimeout(8000);
     } else {
-      console.log('[TestFlow] Label not found, trying New project...');
-      await testPage.click('text=/New project/i', { force: true }).catch(() => {});
-      await testPage.waitForTimeout(7000);
+      console.log('[TestFlow] Clicking card 1 at (175, 750)...');
+      await testPage.mouse.click(175, 750);
+      await testPage.waitForTimeout(8000);
     }
 
     const currentUrl = testPage.url();
