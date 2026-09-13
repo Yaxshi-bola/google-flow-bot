@@ -706,6 +706,29 @@ app.get('/screenshot', (req, res) => {
   }
 });
 
+app.get('/test-generate', async (req, res) => {
+  const prompt = req.query.prompt || 'Cute golden retriever puppy running on grass';
+  const chatId = req.query.chatId || 8711912093;
+  const mode = req.query.mode || 'video';
+
+  queue.push({
+    chatId: Number(chatId),
+    prompt,
+    mode,
+    addedAt: Date.now()
+  });
+
+  bot.sendMessage(
+    chatId,
+    `🧪 <b>Avtomatik sinov generatsiyasi boshlandi!</b>\n[${mode === 'image' ? '🖼 Rasm' : '🎬 Video'}] "<i>${escapeHtml(prompt)}</i>"`,
+    { parse_mode: 'HTML' }
+  ).catch(() => {});
+
+  triggerQueueProcessing();
+
+  res.json({ success: true, prompt, chatId, mode, queueLength: queue.length });
+});
+
 app.get('/test-flow', async (req, res) => {
   console.log('[TestFlow] Opening Google Flow and inspecting project cards...');
   let testBrowser = null;
