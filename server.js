@@ -426,17 +426,6 @@ async function processPrompt(item) {
       console.log('[FlowBot] Current URL after entering project:', page.url());
     }
 
-    // Mode preparation (Image vs Video)
-    if (isImageMode) {
-      console.log('[FlowBot] Preparing image generation mode...');
-      const imageCard = page.locator('text=/edit an image|generate concept art/i').first();
-      if (await imageCard.isVisible().catch(() => false)) {
-        console.log('[FlowBot] Clicking image generation card...');
-        await imageCard.click().catch(() => {});
-        await page.waitForTimeout(1000);
-      }
-    }
-
     // Build explicit AI instruction prompt
     let flowPrompt = prompt.trim();
     if (isImageMode) {
@@ -503,26 +492,28 @@ async function processPrompt(item) {
     // Save screenshot with typed prompt
     await page.screenshot({ path: screenPath }).catch(() => {});
 
-    // Submit prompt: Focus input, press Enter, and click arrow button
+    // Submit prompt: Click "Start generation" arrow button first, fallback to Enter
     console.log('[FlowBot] Submitting prompt...');
-    await input.focus();
-    await page.waitForTimeout(300);
-
-    console.log('[FlowBot] Pressing Enter key in prompt box...');
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
-
     const submitBtn = page.locator('button[aria-label*="Start generation" i], button[aria-label*="generation" i], button:has-text("arrow_forward")').first();
+    await submitBtn.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+
     if (await submitBtn.isVisible().catch(() => false)) {
       console.log('[FlowBot] Clicking "Start generation" button...');
+      await submitBtn.click({ force: true }).catch(() => {});
       const box = await submitBtn.boundingBox().catch(() => null);
       if (box) {
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      } else {
-        await submitBtn.click({ force: true }).catch(() => {});
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2).catch(() => {});
       }
+      await page.waitForTimeout(2000);
     }
-    await page.waitForTimeout(2500);
+
+    // Check if still unsubmitted, retry with Enter
+    if (await submitBtn.isVisible().catch(() => false)) {
+      console.log('[FlowBot] Arrow button still visible, trying Enter key...');
+      await input.focus();
+      await page.keyboard.press('Enter').catch(() => {});
+      await page.waitForTimeout(2000);
+    }
 
     // Auto-confirm credits ("Doim tasdiqlash" / "Tasdiqlash" / "Always confirm")
     console.log('[FlowBot] Checking confirmation dialog...');
