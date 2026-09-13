@@ -803,6 +803,80 @@ app.get('/test-flow', async (req, res) => {
   }
 });
 
+app.get('/inspect', async (req, res) => {
+  console.log('[Inspect] Starting DOM inspection on Google Flow...');
+  let browser = null;
+  try {
+    const cookies = getStoredCookies();
+    browser = await playwright.chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    });
+    const ctx = await browser.newContext({
+      viewport: { width: 1366, height: 900 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+    });
+    if (cookies.length > 0) {
+      const allCookies = cookies.map(c => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain || '.google.com',
+        path: c.path || '/',
+        secure: c.secure !== undefined ? c.secure : true,
+        httpOnly: c.httpOnly !== undefined ? c.httpOnly : false
+      }));
+      await ctx.addCookies(allCookies);
+    }
+    const page = await ctx.newPage();
+    await page.goto('https://flow.google.com/', { waitUntil: 'domcontentloaded', timeout: 50000 });
+    await page.waitForTimeout(6000);
+
+    const newProjBtn = page.locator('text="New project"').first();
+    if (await newProjBtn.isVisible().catch(() => false)) {
+      await newProjBtn.click({ force: true });
+      await page.waitForTimeout(8000);
+    }
+
+    const info = await page.evaluate(() => {
+      const inputs = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"]')).map(el => ({
+        tag: el.tagName.toLowerCase(),
+        type: el.type,
+        placeholder: el.placeholder || el.getAttribute('placeholder'),
+        ariaLabel: el.getAttribute('aria-label'),
+        role: el.getAttribute('role'),
+        rect: {
+          x: Math.round(el.getBoundingClientRect().x),
+          y: Math.round(el.getBoundingClientRect().y),
+          w: Math.round(el.getBoundingClientRect().width),
+          h: Math.round(el.getBoundingClientRect().height)
+        }
+      }));
+
+      const buttons = Array.from(document.querySelectorAll('button, [role="button"]')).map(b => ({
+        text: (b.innerText || '').trim().replace(/\\n+/g, ' ').slice(0, 50),
+        ariaLabel: b.getAttribute('aria-label'),
+        rect: {
+          x: Math.round(b.getBoundingClientRect().x),
+          y: Math.round(b.getBoundingClientRect().y),
+          w: Math.round(b.getBoundingClientRect().width),
+          h: Math.round(b.getBoundingClientRect().height)
+        }
+      }));
+
+      return { inputs, buttons: buttons.filter(b => b.text || b.ariaLabel) };
+    });
+
+    const screenPath = path.join(DOWNLOADS_DIR, 'latest_page.png');
+    await page.screenshot({ path: screenPath });
+    await browser.close();
+
+    res.json({ success: true, url: page.url(), ...info });
+  } catch (err) {
+    if (browser) await browser.close().catch(() => {});
+    res.status(500).json({ success: false, error: err.message, stack: err.stack });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🌐 Server ${PORT}-portda ishlamoqda...`);
 });
