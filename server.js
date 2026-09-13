@@ -406,17 +406,18 @@ async function processPrompt(item) {
         await page.waitForTimeout(4000);
       }
       
-      const card = page.locator('text=/сент|project|loyiha/i').first();
-      if (await card.isVisible().catch(() => false)) {
-        console.log('[FlowBot] Clicking latest project card...');
-        await card.click({ force: true }).catch(() => {});
-        await page.waitForTimeout(5000);
+      const label = page.locator('text=/сент|project|loyiha/i').first();
+      const box = await label.boundingBox().catch(() => null);
+      if (box && box.y > 150) {
+        console.log('[FlowBot] Clicking card preview area at (' + (box.x + box.width / 2) + ', ' + (box.y - 100) + ')...');
+        await page.mouse.click(box.x + box.width / 2, box.y - 100);
+        await page.waitForTimeout(7000);
       } else {
         const newProj = page.locator('text=/new project/i').first();
         if (await newProj.isVisible().catch(() => false)) {
           console.log('[FlowBot] Clicking New Project...');
           await newProj.click({ force: true }).catch(() => {});
-          await page.waitForTimeout(5000);
+          await page.waitForTimeout(7000);
         }
       }
       console.log('[FlowBot] Current URL after entering project:', page.url());
@@ -701,7 +702,7 @@ app.get('/screenshot', (req, res) => {
 });
 
 app.get('/test-flow', async (req, res) => {
-  console.log('[TestFlow] Opening Google Flow and entering project...');
+  console.log('[TestFlow] Opening Google Flow and entering project via card click...');
   let testBrowser = null;
   try {
     const cookies = getStoredCookies();
@@ -732,35 +733,36 @@ app.get('/test-flow', async (req, res) => {
     const testPage = await ctx.newPage();
     console.log('[TestFlow] Navigating to https://flow.google.com/');
     await testPage.goto('https://flow.google.com/', { waitUntil: 'domcontentloaded', timeout: 50000 });
-    await testPage.waitForTimeout(5000);
+    await testPage.waitForTimeout(6000);
 
-    // Click on the latest project card (e.g. сент. 13 or first card)
-    console.log('[TestFlow] Looking for project card...');
-    const card = testPage.locator('text=/сент\. 13/i').first();
-    if (await card.isVisible().catch(() => false)) {
-      console.log('[TestFlow] Found project card, clicking it...');
-      await card.click();
-      await testPage.waitForTimeout(6000);
+    // Find the label 'сент. 13' and click above it (in the card body)
+    console.log('[TestFlow] Locating project card...');
+    const label = testPage.locator('text=/сент|project|loyiha/i').first();
+    const box = await label.boundingBox().catch(() => null);
+    
+    if (box && box.y > 150) {
+      const clickX = box.x + box.width / 2;
+      const clickY = box.y - 100;
+      console.log(`[TestFlow] Clicking card body at (${clickX}, ${clickY})...`);
+      await testPage.mouse.click(clickX, clickY);
+      await testPage.waitForTimeout(7000);
     } else {
-      // Fallback: click New project
-      const newProj = testPage.locator('text=/new project/i').first();
-      if (await newProj.isVisible().catch(() => false)) {
-        console.log('[TestFlow] Clicking New Project...');
-        await newProj.click();
-        await testPage.waitForTimeout(6000);
-      }
+      console.log('[TestFlow] Label not found, trying New project...');
+      await testPage.click('text=/New project/i', { force: true }).catch(() => {});
+      await testPage.waitForTimeout(7000);
     }
 
     const currentUrl = testPage.url();
     const currentTitle = await testPage.title();
-    console.log('[TestFlow] In Project! URL:', currentUrl, 'Title:', currentTitle);
+    console.log('[TestFlow] After click! URL:', currentUrl, 'Title:', currentTitle);
 
     const screenPath = path.join(DOWNLOADS_DIR, 'latest_page.png');
     await testPage.screenshot({ path: screenPath });
 
     // Check if input exists
     const inputSelector = 'textarea, [contenteditable="true"], [role="textbox"], input[placeholder*="yaratilishi" i], input[type="text"]';
-    const hasInput = await testPage.locator(inputSelector).first().isVisible().catch(() => false);
+    const inputEl = testPage.locator(inputSelector).first();
+    const hasInput = await inputEl.isVisible().catch(() => false);
 
     await testBrowser.close();
 
