@@ -397,7 +397,7 @@ async function processPrompt(item) {
       throw new Error('Google hisobiga kirilmadi. Iltimos botga /cookie orqali yangi cookie yuboring!');
     }
 
-    // If on home page or 404 project not found, open latest project or create one
+    // If on home page or 404 project not found, open workspace via New project or existing card
     if (page.url().includes('404') || page.url().endsWith('flow.google.com/') || page.url().endsWith('flow.google.com') || (await page.locator('text=/Project not found/i').isVisible().catch(() => false))) {
       console.log('[FlowBot] Home or 404 page detected. Finding active project...');
       const backBtn = page.locator('button:has-text("Back to projects"), a:has-text("Back to projects"), [role="button"]:has-text("Back to projects")').first();
@@ -406,18 +406,17 @@ async function processPrompt(item) {
         await page.waitForTimeout(4000);
       }
       
-      const label = page.locator('text=/сент|project|loyiha/i').first();
-      const box = await label.boundingBox().catch(() => null);
-      if (box && box.y > 150) {
-        console.log('[FlowBot] Clicking card preview area at (' + (box.x + box.width / 2) + ', ' + (box.y - 100) + ')...');
-        await page.mouse.click(box.x + box.width / 2, box.y - 100);
-        await page.waitForTimeout(7000);
+      const newProjBtn = page.locator('text="New project"').first();
+      if (await newProjBtn.isVisible().catch(() => false)) {
+        console.log('[FlowBot] Clicking "+ New project" button...');
+        await newProjBtn.click({ force: true }).catch(() => {});
+        await page.waitForTimeout(8000);
       } else {
-        const newProj = page.locator('text=/new project/i').first();
-        if (await newProj.isVisible().catch(() => false)) {
-          console.log('[FlowBot] Clicking New Project...');
-          await newProj.click({ force: true }).catch(() => {});
-          await page.waitForTimeout(7000);
+        const card = page.locator('a[href*="/project/"]').first();
+        if (await card.isVisible().catch(() => false)) {
+          console.log('[FlowBot] Clicking first project link...');
+          await card.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(8000);
         }
       }
       console.log('[FlowBot] Current URL after entering project:', page.url());
@@ -444,7 +443,7 @@ async function processPrompt(item) {
     } catch (e) {}
 
     // Flexible selector for input
-    const inputSelector = 'textarea, [contenteditable="true"], [role="textbox"], input[placeholder*="yaratilishi" i], input[type="text"]';
+    const inputSelector = 'textarea, [contenteditable="true"], [role="textbox"], input[placeholder*="create" i], input[placeholder*="yaratilish" i], input[placeholder*="создать" i], input[type="text"]';
     let input = null;
 
     try {
