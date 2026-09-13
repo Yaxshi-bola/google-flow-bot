@@ -343,8 +343,12 @@ async function processPrompt(item) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process'
+        '--js-flags=--max-old-space-size=256',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--mute-audio',
+        '--disable-web-security'
       ]
     });
 
@@ -422,13 +426,26 @@ async function processPrompt(item) {
       console.log('[FlowBot] Current URL after entering project:', page.url());
     }
 
-    // Switch to "Rasmlar" if image mode requested
+    // Mode preparation (Image vs Video)
     if (isImageMode) {
-      console.log('[FlowBot] Switching to Rasmlar tab...');
-      const rasmTab = page.locator('text=/rasmlar|images/i').first();
-      if (await rasmTab.isVisible().catch(() => false)) {
-        await rasmTab.click();
-        await page.waitForTimeout(2000);
+      console.log('[FlowBot] Preparing image generation mode...');
+      const imageCard = page.locator('text=/edit an image|generate concept art/i').first();
+      if (await imageCard.isVisible().catch(() => false)) {
+        console.log('[FlowBot] Clicking image generation card...');
+        await imageCard.click().catch(() => {});
+        await page.waitForTimeout(1000);
+      }
+    }
+
+    // Build explicit AI instruction prompt
+    let flowPrompt = prompt.trim();
+    if (isImageMode) {
+      if (!/image|rasm|photo|picture/i.test(flowPrompt)) {
+        flowPrompt = `Generate an image: ${flowPrompt}`;
+      }
+    } else {
+      if (!/video|clip|animation/i.test(flowPrompt)) {
+        flowPrompt = `Generate a video: ${flowPrompt}`;
       }
     }
 
@@ -442,15 +459,24 @@ async function processPrompt(item) {
       });
     } catch (e) {}
 
-    // Flexible selector for input
-    const inputSelector = 'textarea, [contenteditable="true"], [role="textbox"], input[placeholder*="create" i], input[placeholder*="yaratilish" i], input[placeholder*="создать" i], input[type="text"]';
-    let input = null;
+    // Find the session panel input: contenteditable div or textarea
+    let input = page.locator('[contenteditable="true"]').first();
+    const isEditableVisible = await input.isVisible().catch(() => false);
+    if (!isEditableVisible) {
+      const fallbackSelectors = ['textarea', '[placeholder*="What do you want to create" i]', '[placeholder*="create" i]'];
+      for (const sel of fallbackSelectors) {
+        const cand = page.locator(sel).first();
+        if (await cand.isVisible().catch(() => false)) {
+          input = cand;
+          break;
+        }
+      }
+    }
 
     try {
-      await page.waitForSelector(inputSelector, { timeout: 20000 });
-      input = page.locator(inputSelector).first();
+      await input.waitFor({ state: 'visible', timeout: 25000 });
     } catch (selErr) {
-      console.error('[FlowBot] Input element not found within 20s!');
+      console.error('[FlowBot] Prompt input element not found within 25s!');
       const pageText = await page.evaluate(() => document.body.innerText.slice(0, 400)).catch(() => '');
       console.log('[FlowBot] Page text preview:', pageText);
       await page.screenshot({ path: screenPath }).catch(() => {});
@@ -463,49 +489,37 @@ async function processPrompt(item) {
     }
 
     await input.click();
-    await input.fill(prompt);
-    console.log('[FlowBot] Prompt typed successfully.');
+    await page.waitForTimeout(400);
+
+    // Clear any previous text
+    await page.keyboard.press('Control+A').catch(() => {});
+    await page.keyboard.press('Backspace').catch(() => {});
+
+    // Type prompt
+    await page.keyboard.type(flowPrompt, { delay: 15 });
+    console.log(`[FlowBot] Prompt typed successfully: "${flowPrompt}"`);
     await page.waitForTimeout(1000);
 
     // Save screenshot with typed prompt
     await page.screenshot({ path: screenPath }).catch(() => {});
 
-    // Submit prompt (Container-based rightmost button + Enter key)
+    // Submit prompt using "Start generation" button (aria-label or arrow_forward text)
     console.log('[FlowBot] Submitting prompt...');
-    await page.evaluate(() => {
-      const input = document.querySelector('textarea, [contenteditable="true"], [role="textbox"], input');
-      if (!input) return;
-
-      let current = input.parentElement;
-      for (let depth = 0; depth < 5; depth++) {
-        if (!current) break;
-        const nearButtons = Array.from(current.querySelectorAll('button, [role="button"]')).filter(b => {
-          const style = window.getComputedStyle(b);
-          return style.display !== 'none' && style.visibility !== 'hidden' && b.offsetWidth > 0;
-        });
-
-        if (nearButtons.length > 0) {
-          nearButtons.sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right);
-          const btn = nearButtons[0];
-          btn.focus();
-          btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-          btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-          btn.click();
-          return;
-        }
-        current = current.parentElement;
-      }
-    });
-
-    // Also press Enter natively
-    await input.press('Enter').catch(() => {});
+    const submitBtn = page.locator('button[aria-label*="Start generation" i], button[aria-label*="generation" i], button:has-text("arrow_forward")').first();
+    if (await submitBtn.isVisible().catch(() => false)) {
+      console.log('[FlowBot] Clicking "Start generation" button...');
+      await submitBtn.click({ force: true });
+    } else {
+      console.log('[FlowBot] Pressing Enter on input...');
+      await page.keyboard.press('Enter');
+    }
     await page.waitForTimeout(2500);
 
-    // Auto-confirm credits ("Doim tasdiqlash" / "Tasdiqlash")
+    // Auto-confirm credits ("Doim tasdiqlash" / "Tasdiqlash" / "Always confirm")
     console.log('[FlowBot] Checking confirmation dialog...');
     for (let i = 0; i < 12; i++) {
       await page.waitForTimeout(500);
-      const confirmCandidate = page.locator('text=/doim tasdiqlash|always confirm|tasdiqlash/i').first();
+      const confirmCandidate = page.locator('button:has-text("Doim tasdiqlash"), button:has-text("Always confirm"), button:has-text("Tasdiqlash"), button:has-text("Confirm")').first();
       if (await confirmCandidate.isVisible().catch(() => false)) {
         await confirmCandidate.click();
         console.log('[FlowBot] Confirmed credits dialog!');
@@ -517,12 +531,12 @@ async function processPrompt(item) {
     console.log('[FlowBot] Waiting for generation to complete...');
     let sawProgress = false;
     let completedWait = 0;
-    const maxWaitSeconds = isImageMode ? 120 : 600; // 2 mins for image, 10 for video
+    const maxWaitSeconds = isImageMode ? 150 : 600; // 2.5 mins for image, 10 for video
     let elapsed = 0;
 
     while (elapsed < maxWaitSeconds) {
-      await page.waitForTimeout(2000);
-      elapsed += 2;
+      await page.waitForTimeout(2500);
+      elapsed += 2.5;
 
       // Check for error on page
       const errorEl = page.locator('text=/xatolik|failed|kredit yetarli emas|error/i').first();
@@ -564,14 +578,24 @@ async function processPrompt(item) {
         }
       } else {
         if (elapsed > 20) {
-          // If in image mode, check if image exists
+          // If in image mode, check if newly generated image exists in DOM
           if (isImageMode) {
-            const imgCount = await page.locator('img[src*="blob:"], img[src*="googleusercontent"]').count();
-            if (imgCount > 0) break;
+            const hasNewImg = await page.evaluate(() => {
+              const imgs = Array.from(document.querySelectorAll('img')).filter(i => {
+                const r = i.getBoundingClientRect();
+                return r.width > 120 && r.height > 120 && (i.src.includes('googleusercontent') || i.src.startsWith('blob:'));
+              });
+              return imgs.length > 0;
+            });
+            if (hasNewImg) {
+              console.log('[FlowBot] Generated image detected on page!');
+              break;
+            }
           } else {
             // Check if video element is visible
             const videoEl = page.locator('video').first();
             if (await videoEl.isVisible().catch(() => false)) {
+              console.log('[FlowBot] Video element detected on page!');
               break;
             }
           }
@@ -595,11 +619,13 @@ async function processPrompt(item) {
     await page.waitForTimeout(3000);
 
     if (isImageMode) {
-      // Find image element
+      // Find generated image element (exclude small icons / avatars)
       const imgSrc = await page.evaluate(() => {
-        const imgs = Array.from(document.querySelectorAll('img'));
-        const found = imgs.find(i => i.src && (i.src.includes('googleusercontent') || i.src.startsWith('blob:')));
-        return found ? found.src : null;
+        const imgs = Array.from(document.querySelectorAll('img')).filter(i => {
+          const r = i.getBoundingClientRect();
+          return r.width > 120 && r.height > 120 && (i.src.includes('googleusercontent') || i.src.startsWith('blob:'));
+        });
+        return imgs.length > 0 ? imgs[imgs.length - 1].src : null;
       });
 
       if (imgSrc && imgSrc.startsWith('http')) {
@@ -727,174 +753,6 @@ app.get('/test-generate', async (req, res) => {
   triggerQueueProcessing();
 
   res.json({ success: true, prompt, chatId, mode, queueLength: queue.length });
-});
-
-app.get('/test-flow', async (req, res) => {
-  console.log('[TestFlow] Opening Google Flow and inspecting project cards...');
-  let testBrowser = null;
-  try {
-    const cookies = getStoredCookies();
-    testBrowser = await playwright.chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-    });
-    const ctx = await testBrowser.newContext({
-      viewport: { width: 1366, height: 900 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
-    });
-
-    if (cookies.length > 0) {
-      const allCookies = [];
-      for (const c of cookies) {
-        allCookies.push({
-          name: c.name,
-          value: c.value,
-          domain: c.domain || '.google.com',
-          path: c.path || '/',
-          secure: c.secure !== undefined ? c.secure : true,
-          httpOnly: c.httpOnly !== undefined ? c.httpOnly : false
-        });
-      }
-      await ctx.addCookies(allCookies);
-    }
-
-    const testPage = await ctx.newPage();
-    console.log('[TestFlow] Navigating to https://flow.google.com/');
-    await testPage.goto('https://flow.google.com/', { waitUntil: 'domcontentloaded', timeout: 50000 });
-    await testPage.waitForTimeout(6000);
-
-    // Click "New project" button or card at (175, 750)
-    console.log('[TestFlow] Trying to click "+ New project" button...');
-    const newProjBtn = testPage.locator('text="New project"').first();
-    if (await newProjBtn.isVisible().catch(() => false)) {
-      console.log('[TestFlow] Found "New project" text, clicking it...');
-      await newProjBtn.click({ force: true });
-      await testPage.waitForTimeout(8000);
-    } else {
-      console.log('[TestFlow] Clicking card 1 at (175, 750)...');
-      await testPage.mouse.click(175, 750);
-      await testPage.waitForTimeout(8000);
-    }
-
-    const currentUrl = testPage.url();
-    const currentTitle = await testPage.title();
-    console.log('[TestFlow] After click! URL:', currentUrl, 'Title:', currentTitle);
-
-    const screenPath = path.join(DOWNLOADS_DIR, 'latest_page.png');
-    await testPage.screenshot({ path: screenPath });
-
-    // Check if input exists
-    const inputSelector = 'textarea, [contenteditable="true"], [role="textbox"], input[placeholder*="yaratilishi" i], input[type="text"]';
-    const inputEl = testPage.locator(inputSelector).first();
-    const hasInput = await inputEl.isVisible().catch(() => false);
-
-    await testBrowser.close();
-
-    res.json({
-      success: true,
-      url: currentUrl,
-      title: currentTitle,
-      hasPromptInput: hasInput,
-      screenshotUrl: '/screenshot'
-    });
-  } catch (err) {
-    if (testBrowser) await testBrowser.close().catch(() => {});
-    res.status(500).json({ success: false, error: err.message, stack: err.stack });
-  }
-});
-
-app.get('/inspect', async (req, res) => {
-  console.log('[Inspect] Starting DOM inspection on Google Flow...');
-  let browser = null;
-  try {
-    const cookies = getStoredCookies();
-    browser = await playwright.chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-    });
-    const ctx = await browser.newContext({
-      viewport: { width: 1366, height: 900 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
-    });
-    if (cookies.length > 0) {
-      const allCookies = cookies.map(c => ({
-        name: c.name,
-        value: c.value,
-        domain: c.domain || '.google.com',
-        path: c.path || '/',
-        secure: c.secure !== undefined ? c.secure : true,
-        httpOnly: c.httpOnly !== undefined ? c.httpOnly : false
-      }));
-      await ctx.addCookies(allCookies);
-    }
-    const page = await ctx.newPage();
-    await page.goto('https://flow.google.com/', { waitUntil: 'domcontentloaded', timeout: 50000 });
-    await page.waitForTimeout(6000);
-
-    const newProjBtn = page.locator('text="New project"').first();
-    if (await newProjBtn.isVisible().catch(() => false)) {
-      await newProjBtn.click({ force: true });
-      await page.waitForTimeout(8000);
-    }
-
-    const info = await page.evaluate(() => {
-      const inputs = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"]')).map(el => ({
-        tag: el.tagName.toLowerCase(),
-        type: el.type,
-        placeholder: el.placeholder || el.getAttribute('placeholder'),
-        ariaLabel: el.getAttribute('aria-label'),
-        role: el.getAttribute('role'),
-        rect: {
-          x: Math.round(el.getBoundingClientRect().x),
-          y: Math.round(el.getBoundingClientRect().y),
-          w: Math.round(el.getBoundingClientRect().width),
-          h: Math.round(el.getBoundingClientRect().height)
-        }
-      }));
-
-      const buttons = Array.from(document.querySelectorAll('button, [role="button"]')).map(b => ({
-        text: (b.innerText || '').trim().replace(/\\n+/g, ' ').slice(0, 50),
-        ariaLabel: b.getAttribute('aria-label'),
-        rect: {
-          x: Math.round(b.getBoundingClientRect().x),
-          y: Math.round(b.getBoundingClientRect().y),
-          w: Math.round(b.getBoundingClientRect().width),
-          h: Math.round(b.getBoundingClientRect().height)
-        }
-      }));
-
-      return { inputs, buttons: buttons.filter(b => b.text || b.ariaLabel) };
-    });
-
-    // Click Settings button to inspect generation mode options
-    const settingsBtn = page.locator('button[aria-label="Settings"]').first();
-    let settingsOpen = false;
-    let menuItems = [];
-    if (await settingsBtn.isVisible().catch(() => false)) {
-      await settingsBtn.click();
-      await page.waitForTimeout(1500);
-      settingsOpen = true;
-      menuItems = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], [role="radio"], [role="dialog"], button, [role="tab"]'))
-          .map(el => ({
-            tag: el.tagName.toLowerCase(),
-            role: el.getAttribute('role'),
-            text: (el.innerText || '').trim().replace(/\n+/g, ' ').slice(0, 50),
-            ariaLabel: el.getAttribute('aria-label')
-          }))
-          .filter(el => el.text || el.ariaLabel);
-      });
-    }
-
-    const screenPath = path.join(DOWNLOADS_DIR, 'latest_page.png');
-    await page.screenshot({ path: screenPath });
-    await browser.close();
-
-    res.json({ success: true, url: page.url(), settingsOpen, menuItems, ...info });
-  } catch (err) {
-    if (browser) await browser.close().catch(() => {});
-    res.status(500).json({ success: false, error: err.message, stack: err.stack });
-  }
 });
 
 app.listen(PORT, () => {
