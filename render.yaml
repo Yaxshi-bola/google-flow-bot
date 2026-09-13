@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: google-flow-bot
+    env: docker
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: GOOGLE_FLOW_URL
+        value: https://flow.google.com/project/a3c7d45c-923f-409c-aa83-9bbde11794c6
