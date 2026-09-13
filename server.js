@@ -361,16 +361,10 @@ async function processPrompt(item) {
         allCookies.push({
           name: c.name,
           value: c.value,
-          domain: '.google.com',
-          path: '/',
-          secure: true
-        });
-        allCookies.push({
-          name: c.name,
-          value: c.value,
-          domain: 'flow.google.com',
-          path: '/',
-          secure: true
+          domain: c.domain || '.google.com',
+          path: c.path || '/',
+          secure: c.secure !== undefined ? c.secure : true,
+          httpOnly: c.httpOnly !== undefined ? c.httpOnly : false
         });
       }
       await context.addCookies(allCookies).catch(e => console.error('Error adding cookies:', e.message));
@@ -698,8 +692,14 @@ app.get('/test-flow', async (req, res) => {
     if (cookies.length > 0) {
       const allCookies = [];
       for (const c of cookies) {
-        allCookies.push({ name: c.name, value: c.value, domain: '.google.com', path: '/', secure: true });
-        allCookies.push({ name: c.name, value: c.value, domain: 'flow.google.com', path: '/', secure: true });
+        allCookies.push({
+          name: c.name,
+          value: c.value,
+          domain: c.domain || '.google.com',
+          path: c.path || '/',
+          secure: c.secure !== undefined ? c.secure : true,
+          httpOnly: c.httpOnly !== undefined ? c.httpOnly : false
+        });
       }
       await ctx.addCookies(allCookies);
     }
