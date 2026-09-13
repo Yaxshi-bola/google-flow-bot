@@ -397,6 +397,33 @@ async function processPrompt(item) {
       throw new Error('Google hisobiga kirilmadi. Iltimos botga /cookie orqali yangi cookie yuboring!');
     }
 
+    // If 404 project not found, click "Back to projects" and select latest project
+    if (page.url().includes('404') || (await page.locator('text=/Project not found/i').isVisible().catch(() => false))) {
+      console.log('[FlowBot] 404 Project not found. Clicking "Back to projects"...');
+      const backBtn = page.locator('button:has-text("Back to projects"), a:has-text("Back to projects"), [role="button"]:has-text("Back to projects")').first();
+      if (await backBtn.isVisible().catch(() => false)) {
+        await backBtn.click();
+        await page.waitForTimeout(5000);
+        console.log('[FlowBot] Now at projects page:', page.url());
+      }
+      
+      const firstProj = page.locator('a[href*="/project/"]').first();
+      if (await firstProj.isVisible().catch(() => false)) {
+        console.log('[FlowBot] Clicking first existing project...');
+        await firstProj.click();
+        await page.waitForTimeout(5000);
+        console.log('[FlowBot] Opened project:', page.url());
+      } else {
+        const newProjBtn = page.locator('button:has-text("New"), [role="button"]:has-text("New"), button:has-text("Loyiha"), [role="button"]:has-text("Loyiha")').first();
+        if (await newProjBtn.isVisible().catch(() => false)) {
+          console.log('[FlowBot] Clicking create new project button...');
+          await newProjBtn.click();
+          await page.waitForTimeout(5000);
+          console.log('[FlowBot] Opened new project:', page.url());
+        }
+      }
+    }
+
     // Switch to "Rasmlar" if image mode requested
     if (isImageMode) {
       console.log('[FlowBot] Switching to Rasmlar tab...');
@@ -711,6 +738,22 @@ app.get('/test-flow', async (req, res) => {
     const title = await testPage.title();
     const url = testPage.url();
     const isSignIn = url.includes('accounts.google.com');
+    if (testPage.url().includes('404') || (await testPage.locator('text=/Project not found/i').isVisible().catch(() => false))) {
+      console.log('[TestFlow] 404 detected. Clicking "Back to projects"...');
+      const backBtn = testPage.locator('button:has-text("Back to projects"), a:has-text("Back to projects"), [role="button"]:has-text("Back to projects")').first();
+      if (await backBtn.isVisible().catch(() => false)) {
+        await backBtn.click();
+        await testPage.waitForTimeout(5000);
+        console.log('[TestFlow] Navigated to:', testPage.url());
+      }
+      const firstProj = testPage.locator('a[href*="/project/"]').first();
+      if (await firstProj.isVisible().catch(() => false)) {
+        await firstProj.click();
+        await testPage.waitForTimeout(5000);
+        console.log('[TestFlow] Opened project:', testPage.url());
+      }
+      await testPage.screenshot({ path: screenPath });
+    }
     const screenPath = path.join(DOWNLOADS_DIR, 'latest_page.png');
     await testPage.screenshot({ path: screenPath });
 
