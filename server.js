@@ -470,29 +470,35 @@ async function processPrompt(item) {
     // Save screenshot with typed prompt
     await page.screenshot({ path: screenPath }).catch(() => {});
 
-    // Submit button (arrow ->)
-    console.log('[FlowBot] Searching for submit button...');
-    const buttons = page.locator('button, [role="button"]');
-    const btnCount = await buttons.count();
-    let submitBtn = null;
+    // Submit prompt (Container-based rightmost button + Enter key)
+    console.log('[FlowBot] Submitting prompt...');
+    await page.evaluate(() => {
+      const input = document.querySelector('textarea, [contenteditable="true"], [role="textbox"], input');
+      if (!input) return;
 
-    for (let i = btnCount - 1; i >= 0; i--) {
-      const b = buttons.nth(i);
-      const isVis = await b.isVisible().catch(() => false);
-      if (!isVis) continue;
-      const text = (await b.innerText().catch(() => '')).toLowerCase();
-      if (text.includes('xarajat') || text.includes('batafsil') || text.includes('fikrlash')) continue;
-      submitBtn = b;
-      break;
-    }
+      let current = input.parentElement;
+      for (let depth = 0; depth < 5; depth++) {
+        if (!current) break;
+        const nearButtons = Array.from(current.querySelectorAll('button, [role="button"]')).filter(b => {
+          const style = window.getComputedStyle(b);
+          return style.display !== 'none' && style.visibility !== 'hidden' && b.offsetWidth > 0;
+        });
 
-    if (submitBtn) {
-      console.log('[FlowBot] Clicking submit button...');
-      await submitBtn.click();
-    } else {
-      console.log('[FlowBot] Submit button not detected, pressing Enter...');
-    }
-    await input.press('Enter');
+        if (nearButtons.length > 0) {
+          nearButtons.sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right);
+          const btn = nearButtons[0];
+          btn.focus();
+          btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+          btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+          btn.click();
+          return;
+        }
+        current = current.parentElement;
+      }
+    });
+
+    // Also press Enter natively
+    await input.press('Enter').catch(() => {});
     await page.waitForTimeout(2500);
 
     // Auto-confirm credits ("Doim tasdiqlash" / "Tasdiqlash")
