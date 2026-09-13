@@ -703,7 +703,7 @@ app.get('/screenshot', (req, res) => {
 });
 
 app.get('/test-flow', async (req, res) => {
-  console.log('[TestFlow] Running Google Flow connection diagnostic...');
+  console.log('[TestFlow] Running Google Flow direct home test...');
   let testBrowser = null;
   try {
     const cookies = getStoredCookies();
@@ -732,32 +732,26 @@ app.get('/test-flow', async (req, res) => {
     }
 
     const testPage = await ctx.newPage();
-    await testPage.goto(GOOGLE_FLOW_URL, { waitUntil: 'domcontentloaded', timeout: 50000 });
+    console.log('[TestFlow] Navigating to https://flow.google.com/');
+    await testPage.goto('https://flow.google.com/', { waitUntil: 'domcontentloaded', timeout: 50000 });
     await testPage.waitForTimeout(6000);
 
     const title = await testPage.title();
     const url = testPage.url();
-    const isSignIn = url.includes('accounts.google.com');
-    if (testPage.url().includes('404') || (await testPage.locator('text=/Project not found/i').isVisible().catch(() => false))) {
-      console.log('[TestFlow] 404 detected. Clicking "Back to projects"...');
-      const backBtn = testPage.locator('button:has-text("Back to projects"), a:has-text("Back to projects"), [role="button"]:has-text("Back to projects")').first();
-      if (await backBtn.isVisible().catch(() => false)) {
-        await backBtn.click();
-        await testPage.waitForTimeout(5000);
-        console.log('[TestFlow] Navigated to:', testPage.url());
-      }
-      const firstProj = testPage.locator('a[href*="/project/"]').first();
-      if (await firstProj.isVisible().catch(() => false)) {
-        await firstProj.click();
-        await testPage.waitForTimeout(5000);
-        console.log('[TestFlow] Opened project:', testPage.url());
-      }
-      await testPage.screenshot({ path: screenPath });
-    }
+    console.log('[TestFlow] URL:', url, 'Title:', title);
+
     const screenPath = path.join(DOWNLOADS_DIR, 'latest_page.png');
     await testPage.screenshot({ path: screenPath });
 
-    const pageText = await testPage.evaluate(() => document.body.innerText.slice(0, 300)).catch(() => '');
+    const pageText = await testPage.evaluate(() => document.body.innerText.slice(0, 500)).catch(() => '');
+
+    const links = await testPage.evaluate(() => {
+      return Array.from(document.querySelectorAll('a, button, [role="button"]')).map(el => ({
+        tag: el.tagName,
+        text: (el.innerText || el.textContent || '').trim().slice(0, 50),
+        href: el.href || el.getAttribute('href') || null
+      })).filter(x => x.text.length > 0).slice(0, 30);
+    }).catch(() => []);
 
     await testBrowser.close();
 
@@ -765,9 +759,9 @@ app.get('/test-flow', async (req, res) => {
       success: true,
       url,
       title,
-      isSignInRedirect: isSignIn,
       cookiesLoaded: cookies.length,
       pageTextPreview: pageText,
+      elements: links,
       screenshotUrl: '/screenshot'
     });
   } catch (err) {
