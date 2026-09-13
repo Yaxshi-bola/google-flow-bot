@@ -37,6 +37,22 @@ let currentProgress = null;
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 console.log('🤖 Google Flow Telegram Bot ishga tushdi...');
 
+bot.on('polling_error', (error) => {
+  console.error('⚠️ Telegram polling error:', error?.message || error);
+});
+
+bot.on('error', (error) => {
+  console.error('⚠️ Telegram general error:', error?.message || error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught Exception:', err);
+});
+
 // Helper: Parse cookies from string or JSON
 function parseCookies(raw) {
   if (!raw) return [];
